@@ -13,7 +13,8 @@ Source: https://bitbucket.org/kbr/fritzconnection
 Author: Klaus Bremer
 """
 
-import os, argparse
+import os
+import argparse
 
 # tiny hack to run this as a package but also from the command line. In
 # the latter case ValueError is raised from python 2.7,
@@ -34,6 +35,31 @@ def get_version():
     return __version__
 
 
+class FritzConnectionRestricted(fritzconnection.FritzConnection):
+    def __init__(self,
+                 address=fritzconnection.FRITZ_IP_ADDRESS,
+                 port=fritzconnection.FRITZ_TCP_PORT,
+                 user=fritzconnection.FRITZ_USERNAME,
+                 password='',
+                 restrict=None):
+        self.restrict = restrict
+        if restrict is not None:
+            tmprestrict = list()
+            for entry in restrict:
+                if not ':' in entry:
+                    entry += ':1'
+                tmprestrict.append(entry)
+            self.restrict = tmprestrict
+        super().__init__(address, port, user, password)
+
+    def _read_services(self, services: list):
+        if self.restrict is not None:
+            for x in range(len(services)-1, -1, -1):
+                if services[x].name not in self.restrict:
+                    del services[x]
+        return super()._read_services(services)
+
+
 class FritzHosts(object):
 
     def __init__(self,
@@ -42,9 +68,9 @@ class FritzHosts(object):
                  port=fritzconnection.FRITZ_TCP_PORT,
                  user=fritzconnection.FRITZ_USERNAME,
                  password=''):
-        super(FritzHosts, self).__init__()
+        super().__init__()
         if fc is None:
-            fc = fritzconnection.FritzConnection(address, port, user, password)
+            fc = FritzConnectionRestricted(address, port, user, password, [SERVICE])
         self.fc = fc
 
     def action(self, actionname, **kwargs):
@@ -56,6 +82,7 @@ class FritzHosts(object):
 
     @property
     def host_numbers(self):
+        print("getting host numbers...")
         result = self.action('GetHostNumberOfEntries')
         return result['NewHostNumberOfEntries']
 
@@ -102,7 +129,7 @@ def print_hosts(fh):
         'n', 'ip', 'name', 'mac', 'status'))
     hosts = fh.get_hosts_info()
     for index, host in enumerate(hosts):
-        status = 'active' if host['status'] == '1' else  '-'
+        status = 'active' if host['status'] == '1' else '-'
         ip = '-' if host['ip'] == None else host['ip']
         mac = '-' if host['mac'] == None else host['mac']
         print('{:>3}: {:<15} {:<26} {:<17}   {}'.format(
@@ -111,7 +138,7 @@ def print_hosts(fh):
             host['name'],
             mac,
             status,
-            )
+        )
         )
     print('\n')
 
@@ -129,6 +156,7 @@ def _print_detail(fh, detail, quiet):
             print(info['NewActive'])
     else:
         print('0')
+
 
 def _print_nums(fh):
     print('{:<20}{}\n'.format('Number of hosts:', fh.host_numbers))
@@ -154,7 +182,7 @@ def _get_cli_arguments():
                         nargs=1, default=os.getenv('FRITZ_USERNAME', fritzconnection.FRITZ_USERNAME),
                         help='Fritzbox authentication username')
     parser.add_argument('-p', '--password',
-                        nargs=1, default=os.getenv('FRITZ_PASSWORD',''),
+                        nargs=1, default=os.getenv('FRITZ_PASSWORD', ''),
                         help='Fritzbox authentication password')
     parser.add_argument('-a', '--all',
                         action='store_true',
@@ -189,8 +217,10 @@ def _print_status(arguments):
     else:
         print_hosts(fh)
 
+
 def main():
     _print_status(_get_cli_arguments())
+
 
 if __name__ == '__main__':
     main()
